@@ -1,15 +1,13 @@
 package tr;
 
-import tr.broadcast.BroadcastManager;
-import tr.broadcast.InetAddrsComparator;
-import tr.broadcast.Message;
+import tr.broadcast.*;
 import tr.tcp.TCPManager;
 import tr.utils.BroadcastResult;
 
 import java.net.InetAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
-import java.util.ArrayList;
+import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
@@ -20,79 +18,99 @@ public class SuperManager {
     TCPManager tcpManager;
     StateMachine mStateMachine;
     TCPHandler tcpHandler;
+    Timer mTimer = new Timer();
+    InetAddrsComparator inetAddrsComparator = new InetAddrsComparator();
+    ConcurrentLinkedQueue<TypeMessage> eventQueue;
+
 
     public SuperManager(StateMachine sm) throws SocketException, UnknownHostException {
         mStateMachine = sm;
         bManager = new BroadcastManager(sm);
-        ConcurrentLinkedQueue<Message> tcpRQueue = new ConcurrentLinkedQueue<>();
-        tcpManager = new TCPManager(tcpRQueue, sm.tcpPort);
-        tcpHandler = new TCPHandler(tcpRQueue);
+         eventQueue = new ConcurrentLinkedQueue<>();
+        tcpManager = new TCPManager(eventQueue, sm.tcpPort);
+        tcpHandler = new TCPHandler(eventQueue);
         tcpHandler.run();
     }
 
-    public void onMessageReceive(Message msg) {
-        Data dataToSend = msg.data.update();
-        sendDataToSuccessor(dataToSend);
+    public void start() {
+        mTimer.schedule(new ClaimTokenSendTask(System.currentTimeMillis()), mStateMachine.delay, mStateMachine.delay);
+//        while (true) {
+//            if (mStateMachine.hasToken) {
+//                if (mStateMachine.nextStation == null) {
+//                    sendSS2();
+//                } else {
+//                    sendSS1();
+//                }
+//            }
+//        }
+
     }
 
-    private void sendDataToSuccessor(Data dataToSend) {
-        if (mStateMachine.nextStation != null) {
-            bManager.sendSSByLeader(new BroadcastResult<ArrayList<InetAddress>>() {
-                @Override
-                public void onResult(ArrayList<InetAddress> resultBuffer) {
-                    InetAddress addressToSend;
-                    if (resultBuffer.size() == 0) {
+    public void run() {
+
+    }
+
+    private void sendMessage(InetAddress to) {
+        mStateMachine.nextStation = to;
+        tcpManager.sendMessage(new Message(mStateMachine.myAddrs, mStateMachine.nextStation, FC.T, 0, null));
+    }
+
+    private void sendSS2() {
+        bManager.sendSS2ByLeader(new BroadcastResult<List<InetAddress>>() {
+            @Override
+            public void onResult(List<InetAddress> resultBuffer) {
+                for (InetAddress i : resultBuffer) {
+                    if (inetAddrsComparator.compare(i, mStateMachine.myAddrs) == -1) {
+                        mStateMachine.nextStation = i;
+                        tcpManager.sendMessage(new Message(mStateMachine.myAddrs, mStateMachine.nextStation, FC.T, 0, null));
                         return;
                     }
-                    resultBuffer.add(mStateMachine.myAddrs);
-                    resultBuffer.sort(new InetAddrsComparator());
-                    for (int i = 0; i < resultBuffer.size(); i++) {
-                        if (resultBuffer.get(i).equals(mStateMachine.myAddrs)) {
-                            if (i != 0) {
-                                addressToSend = resultBuffer.get(i - 1);
-                                break;
-                            } else {
-                                addressToSend = resultBuffer.get(resultBuffer.size() - 1);
-                                break;
-                            }
-                        }
-                    }
-                    //TCPManager.sendData(dataToSend, addressToSend)
                 }
-            });
-        } else {
-                bManager.sendSS2ByLeader(new BroadcastResult<ArrayList<InetAddress>>() {
-                    @Override
-                    public void onResult(ArrayList<InetAddress> resultBuffer) {
-                        if (resultBuffer.size() == 0) {
-                            //шлем SS2, пока кого-нибудь не найдем
-                            sendDataToSuccessor(dataToSend);
-                        } else {
-                            InetAddress addressToSend;
-                            resultBuffer.add(mStateMachine.myAddrs);
-                            resultBuffer.sort(new InetAddrsComparator());
-                            for (int i = 0; i < resultBuffer.size(); i++) {
-                                if (resultBuffer.get(i).equals(mStateMachine.myAddrs)) {
-                                    if (i != 0) {
-                                        addressToSend = resultBuffer.get(i - 1);
-                                        break;
-                                    } else {
-                                        addressToSend = resultBuffer.get(resultBuffer.size() - 1);
-                                        break;
-                                    }
-                                }
-                            }
-                            //TCPManager.sendData(dataToSend, addressToSend)
-                        }
-                    }
-                });
+                sendMessage(resultBuffer.get(resultBuffer.size() - 1));
             }
+        });
+    }
+
+    private void sendSS1() {
+        bManager.sendSSByLeader(new BroadcastResult<List<InetAddress>>() {
+            @Override
+            public void onResult(List<InetAddress> resultBuffer) {
+                if (resultBuffer.size() > 0) {
+                    sendMessage(resultBuffer.get(resultBuffer.size() - 1));
+                } else {
+                    sendMessage(mStateMachine.nextStation);
+                }
+            }
+        });
+    }
+
+
+
+
+    public void onMessageReceive(Message msg) {
+        Data dataToSend = msg.data.update();
+        //sendDataToSuccessor(dataToSend);
+    }
+
+    class ClaimTokenSendTask extends TimerTask {
+        ClaimTokenSendTask(long l) {
+
         }
 
-    class TCPHandler implements Runnable {
-        ConcurrentLinkedQueue<Message> rQueue;
+        @Override
+        public void run() {
+            long lastTime = System.currentTimeMillis();
+            if (!mStateMachine.hasToken && lastTime - mStateMachine.lastTimeMessage > mStateMachine.delay) {
+                bManager.sendClaimToken();
 
-        public TCPHandler(ConcurrentLinkedQueue<Message> rQueue) {
+            }
+        }
+    }
+
+    class TCPHandler implements Runnable {
+        ConcurrentLinkedQueue<TypeMessage> rQueue;
+
+        public TCPHandler(ConcurrentLinkedQueue<TypeMessage> rQueue) {
             this.rQueue = rQueue;
         }
 
@@ -111,8 +129,16 @@ public class SuperManager {
             }
         }
 
-        private void onReceive(Message message) {
-            onMessageReceive(message);
+        private void onReceive(TypeMessage message) {
+            if (message instanceof ErrorConectionMessage) {
+                sendSS2();
+            } else {
+                if (message instanceof Message) {
+                    sendSS1();
+                }
+            }
+            //onMessageReceive(message);
         }
     }
+
 }

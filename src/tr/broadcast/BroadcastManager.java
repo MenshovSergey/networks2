@@ -4,17 +4,17 @@ import tr.Data;
 import tr.StateMachine;
 import tr.utils.BroadcastResult;
 
+import java.io.ObjectInputStream;
+import java.io.Reader;
 import java.net.InetAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
+import java.util.Scanner;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
-/**
- * Created by ks.kochetov on 16.10.2015.
- */
 public class BroadcastManager {
     public static InetAddress NULL_ADDRESS;
     final ConcurrentLinkedQueue<Message> sQueue;
@@ -24,8 +24,8 @@ public class BroadcastManager {
     BroadcastSender brdSender;
     StateMachine mStateMachine;
     Timer mTimer;
-    //если приходит SS1, то сохраняем адрес лидера, который вызвал этот процесс, чтобы ответить на этот SS1 только один раз
-    InetAddress ssSa;
+    //пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ SS1, пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅ SS1 пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅ
+    InetAddress ssInitiatorAddrs;
 
     public BroadcastManager(StateMachine stateMachine) throws SocketException, UnknownHostException {
         NULL_ADDRESS = InetAddress.getByAddress(new byte[]{0,0,0,0});
@@ -35,14 +35,15 @@ public class BroadcastManager {
         brdReceiver = new BroadcastReceiver(stateMachine.broadcastPort, rQueue);
         brdSender = new BroadcastSender(stateMachine.broadcastPort, sQueue);
         mTimer = new Timer();
-        ssSa = mStateMachine.myAddrs;
+        ssInitiatorAddrs = mStateMachine.myAddrs;
+        startBroadcasting();
     }
 
     public void sendBroadcast(Message brd) {
-        synchronized (sQueue) {
-            sQueue.add(brd);
-            sQueue.notify();
-        }
+
+        sQueue.add(brd);
+        sQueue.notify();
+
     }
 
     public void startBroadcasting() {
@@ -53,7 +54,7 @@ public class BroadcastManager {
         t.start();
     }
 
-    private void sendClaimToken() {
+    public void sendClaimToken() {
         Message brdToSend = new Message(NULL_ADDRESS, mStateMachine.myAddrs, FC.CT, 0, new Data(""));
         sendBroadcast(brdToSend);
     }
@@ -84,10 +85,10 @@ public class BroadcastManager {
         sendBroadcast(brdToSend);
     }
 
-    //TODO: перенести в SM
+    //TODO: пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ SM
     private void onClaimTokenReceive(Message brd) {
         if (!mStateMachine.claimTokenMode) {
-            sendClaimToken();
+            //sendClaimToken();
             mStateMachine.claimTokenBuffer = new ArrayList<>();
             mStateMachine.claimTokenBuffer.add(brd.sa);
             mStateMachine.claimTokenMode = true;
@@ -95,14 +96,16 @@ public class BroadcastManager {
             mTimer.schedule(cthr, mStateMachine.delay);
         } else {
             mStateMachine.claimTokenBuffer.add(brd.sa);
+
         }
     }
 
     private void onSolicitSuccessorReceive(Message brd) {
-        if (!ssSa.equals(brd.da)) {
-            ssSa = brd.sa;
+
+        if (!ssInitiatorAddrs.equals(brd.da)) {
+            ssInitiatorAddrs = brd.sa;
         } else {
-            //Если кто-то левый(не лидер) отвечает на SS1 лидера, то мы игнорируем
+            //Р•СЃР»Рё РєС‚Рѕ-С‚Рѕ Р»РµРІС‹Р№(РЅРµ Р»РёРґРµСЂ) РѕС‚РІРµС‡Р°РµС‚ РЅР° SS1 Р»РёРґРµСЂР°, С‚Рѕ РјС‹ РёРіРЅРѕСЂРёСЂСѓРµРј
             return;
         }
         if (brd.sa != mStateMachine.myAddrs) {
@@ -160,17 +163,25 @@ public class BroadcastManager {
     private void handleReceivedClaimTokens() {
         mStateMachine.claimTokenMode = false;
         ArrayList<InetAddress> ias = mStateMachine.claimTokenBuffer;
+
         ias.sort(new InetAddrsComparator());
         if (mStateMachine.myAddrs == ias.get(ias.size() - 1)) {
             onBecomeLeader();
         }
     }
 
+    private void onBecomeLeader() {
+        mStateMachine.hasToken = true;
+
+    }
+
     private void handleReceivedSS2(BroadcastResult bRes) {
-        bRes.onResult(ss2Buffer);
+        ss2Buffer.sort(new InetAddrsComparator());
+        bRes.onResult(ssBuffer);
     }
 
     private void handleReceivedSS(BroadcastResult bRes) {
+        ss2Buffer.sort(new InetAddrsComparator());
         bRes.onResult(ssBuffer);
     }
 
@@ -190,7 +201,10 @@ public class BroadcastManager {
             }
         }
 
+
         private void handleBroadcast(Message brd) {
+            mStateMachine.lastTimeMessage = System.currentTimeMillis();
+
             switch (brd.eFc) {
                 case CT:
                     onClaimTokenReceive(brd);

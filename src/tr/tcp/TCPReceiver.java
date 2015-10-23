@@ -1,6 +1,7 @@
 package tr.tcp;
 
 import tr.broadcast.Message;
+import tr.broadcast.TypeMessage;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -13,10 +14,10 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  */
 public class TCPReceiver implements Runnable {
     private static final int SIZE = 1024;
-    final ConcurrentLinkedQueue<Message> rQueue;
+    final ConcurrentLinkedQueue<TypeMessage> rQueue;
     private ServerSocket serverSocket;
 
-    public TCPReceiver(ConcurrentLinkedQueue<Message> rQueue, int portToReceive) {
+    public TCPReceiver(ConcurrentLinkedQueue<TypeMessage> rQueue, int portToReceive) {
         this.rQueue = rQueue;
         try {
             serverSocket = new ServerSocket(portToReceive);

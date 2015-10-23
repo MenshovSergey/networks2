@@ -17,6 +17,7 @@ public class StateMachine {
     public String token;
     public long lastBroadcast;
     public boolean imLeader;
+    public long lastTimeMessage;
 
 
     public StateMachine() throws SocketException {
@@ -30,6 +31,7 @@ public class StateMachine {
         claimTokenMode = false;
         ss2Mode = false;
         ssMode = false;
+        lastTimeMessage = System.currentTimeMillis();
     }
 
 }

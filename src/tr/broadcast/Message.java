@@ -10,7 +10,7 @@ import java.util.Arrays;
 /**
  * Created by kk1 on 15.10.2015.
  */
-public class Message {
+public class Message implements TypeMessage {
     InetAddress da,sa;
     byte fc;
     FC eFc;

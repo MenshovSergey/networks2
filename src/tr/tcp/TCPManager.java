@@ -1,6 +1,7 @@
 package tr.tcp;
 
 import tr.broadcast.Message;
+import tr.broadcast.TypeMessage;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -14,15 +15,17 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  */
 public class TCPManager {
     final ConcurrentLinkedQueue<Message> sQueue;
-    final ConcurrentLinkedQueue<Message> rQueue;
+    final ConcurrentLinkedQueue<TypeMessage> rQueue;
     TCPReceiver tcpReceiver;
     TCPSender tcpSender;
 
-    public TCPManager(ConcurrentLinkedQueue<Message> rQueue, int port) {
+    public TCPManager(ConcurrentLinkedQueue<TypeMessage> rQueue, int port) {
         this.sQueue = new ConcurrentLinkedQueue<>();
         this.rQueue = rQueue;
         tcpReceiver = new TCPReceiver(rQueue, port);
-        tcpSender = new TCPSender(sQueue, port);
+        tcpSender = new TCPSender(sQueue, port, rQueue);
+        tcpReceiver.run();
+        tcpSender.run();
     }
 
     public void sendMessage(Message message) {
